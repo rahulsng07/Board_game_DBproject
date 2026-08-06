@@ -1,0 +1,105 @@
+pipeline {
+    agent any
+    
+    tools{
+        jdk'java'
+        maven'maven'
+    }
+    
+    environment{
+        AWS_REGION='ap-south-1'
+        CLUSTER_NAME='gameprojectcluster'
+        DOCKER_IMAGE='rahulsingh1207/bordgame-image:latest'
+    }
+
+    stages {
+         stage('Git-clone') {
+            steps {
+                git branch: 'main', url: 'https://github.com/rahulsng07/Board_game_DBproject.git'
+            }
+        }
+        
+         stage('Maven-Compile') {
+            steps {
+                sh 'mvn compile'
+            }
+        }
+        
+         stage('Maven-Test') {
+            steps {
+                sh 'mvn test'
+            }
+        }
+        
+        stage('SonarQube Code Analysis') {
+            steps {
+                withSonarQubeEnv('sonarqube') {
+                 sh 'mvn verify sonar:sonar -Dsonar.projectName=BoardGame -Dsonar.projectName=BoardGame'
+                  }
+            }
+        }
+        
+        stage('Maven-Package') {
+            steps {
+                sh 'mvn package'
+            }
+        }
+        
+         stage('Nexus-Deploy artifect with nexus repo') {
+            steps {
+                withMaven(globalMavenSettingsConfig: 'ConfigNexusID', jdk: 'java', maven: 'maven', traceability: true) {
+                  sh 'mvn clean package'
+                }
+            }
+        }
+        
+        stage('Docker-Image Generate') {
+            steps {
+                withDockerRegistry(credentialsId: 'dockerid', url:'https://index.docker.io/v1/') {
+                    sh 'docker build -t rahulsingh1207/bordgame-image .'
+                  }
+            }
+        }
+        
+         stage('Docker-Image Push to Docker-hub') {
+            steps {
+                withDockerRegistry(credentialsId: 'dockerid', url:'https://index.docker.io/v1/') {
+                    sh '''docker tag rahulsingh1207/bordgame-image rahulsingh1207/bordgame-image:latest
+                          docker push rahulsingh1207/bordgame-image '''
+                  }
+            }
+        }
+        
+        stage('Deploy app in AWS eks cluster') {
+            steps {
+                withAWS(credentials: 'AWS id', region: 'ap-south-1') {
+                    sh '''aws eks update-kubeconfig --region ${AWS_REGION} --name ${CLUSTER_NAME}
+                          kubectl apply -f deployment-service.yaml
+                       '''
+                   }
+            }
+        }
+    }
+        
+        post {
+            success {
+                     mail bcc: '', 
+                     body: 'This is inform you that the build is successful.', 
+                     cc: 'rahulrajput875724@gmail.com', 
+                     from: 'rahulsingh875724@gmail.com', 
+                     replyTo: '', 
+                     subject: 'Build Success', 
+                     to: ''
+                 }
+            failure{
+                mail bcc: '', 
+                     body: 'This is inform you that the build is Failed.', 
+                     cc: 'rahulrajput875724@gmail.com', 
+                     from: 'rahulsingh875724@gmail.com', 
+                     replyTo: '', 
+                     subject: 'Build Failed', 
+                     to: ''
+            }     
+         }
+    }
+
